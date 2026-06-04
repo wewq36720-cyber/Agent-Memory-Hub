@@ -1,0 +1,82 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: distiller-mysql
+    restart: unless-stopped
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      TZ: ${TZ:-Asia/Shanghai}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --ngram-token-size=2
+      - --default-authentication-plugin=mysql_native_password
+    volumes:
+      - distiller-mysql-data:/var/lib/mysql
+      - ./docker/mysql/:/docker-entrypoint-initdb.d/:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - distiller-net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: distiller-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      JSONL_LOG_DIR: /app/logs
+      LOG_LEVEL: INFO
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./src:/app/src:ro
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - distiller-net
+
+  # task-worker:
+  #   后台任务（演进阶段启用）
+  #   build: ./worker
+  #   depends_on:
+  #     - mysql
+
+  # mcp:
+  #   MCP server（演进阶段启用）
+  #   build: ./mcp
+  #   depends_on:
+  #     - api
+
+volumes:
+  distiller-mysql-data:
+    name: distiller-mysql-data
+
+networks:
+  distiller-net:
+    name: distiller-net
+    driver: bridge
